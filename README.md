@@ -111,12 +111,3 @@ Implementation notes:
 
 - If the GUI does not open, confirm Tkinter is installed with your Python distribution.
 - If audio does not play, ensure `enable_sound` is checked in Settings and the referenced files exist.
-
-## Credits
-
-- Design: You
-- Implementation: helper script
-
-## License
-
-This project is provided as-is. Add a license file if you intend to open-source it.
