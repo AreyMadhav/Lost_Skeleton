@@ -79,6 +79,34 @@ Ideas:
 - Add volume controls or richer audio handling via `pygame`.
 - Polish UI colors, icons and animations.
 
+## Visual Assets (Images & Sprites)
+
+Place visual assets in an `assets/` or `images/` folder next to `skeleton.py`. Recommended structure:
+
+```
+Lost_Skeleton_alpha/
+	assets/
+		mainmenu_bg.png       # main menu background (PNG recommended)
+		logo.png              # optional logo for title
+		hud_icons/            # small icons for HUD (heart, eye, star)
+		portraits/            # character portraits (PNG, 256x256 or similar)
+		sprites/              # small sprites for decorations (festival, mural pieces)
+```
+
+Where to use visuals in the game:
+- Main Menu background and logo (`assets/mainmenu_bg.png`, `assets/logo.png`).
+- Scene backdrops: per-scene background images to set mood (e.g. `assets/backdrops/tree.png`).
+- HUD icons: replace text labels with small images for `compassion`, `visibility`, `ambition`.
+- Choice buttons: small icon markers or portrait thumbnails beside choices.
+- Endings screens: larger images or mural textures for finale scenes.
+- Decorative sprites: festival banners, mural fragments, or particle overlays to enhance important scenes.
+
+Implementation notes:
+- The game will attempt to load `assets/mainmenu_bg.png` (or JPG) automatically for the main menu if present.
+- Use PNG for transparency and better quality; keep sizes reasonable (desktop-sized backgrounds can be scaled at runtime).
+- For JPEG support and image resizing the game will use Pillow (`pip install pillow`) if available; otherwise use PNG with `tk.PhotoImage`.
+
+
 ## Troubleshooting
 
 - If the GUI does not open, confirm Tkinter is installed with your Python distribution.

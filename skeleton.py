@@ -320,6 +320,10 @@ class TextAdventureGame:
         self.chapter = 0
         self.font_size = 12
 
+        # Music control
+        self._music_thread = None
+        self._music_stop_event = None
+
         # Gameplay tracking
         self.history = []  # list of {scene_id, title, choice}
         self.stats = {"compassion": 0, "visibility": 0, "ambition": 0}
@@ -430,12 +434,31 @@ class TextAdventureGame:
         hud_title = tk.Label(self.right_frame, text="HUD", fg="white", bg="black", font=("Arial", 14, "bold"))
         hud_title.pack(pady=(6, 2))
 
-        # Stats labels
+        # Stats labels: icon + numeric value rows
+        self.hud_images = {}
         self.stat_labels = {}
+        icon_map = {"compassion": "heart.png", "visibility": "eye.png", "ambition": "star.png"}
         for key in ["compassion", "visibility", "ambition"]:
-            lbl = tk.Label(self.right_frame, text=f"{key.capitalize()}: 0", fg="white", bg="black")
-            lbl.pack(anchor=tk.W, padx=8)
-            self.stat_labels[key] = lbl
+            row = tk.Frame(self.right_frame, bg="black")
+            row.pack(anchor=tk.W, padx=8, pady=2)
+            img_path = os.path.join(os.path.dirname(__file__), "assets", "hud_icons", icon_map.get(key, ""))
+            img = None
+            try:
+                if os.path.exists(img_path):
+                    img = tk.PhotoImage(file=img_path)
+            except Exception:
+                img = None
+            if img:
+                # keep reference to avoid GC
+                self.hud_images[key] = img
+                icon_lbl = tk.Label(row, image=img, bg="black")
+                icon_lbl.pack(side=tk.LEFT)
+            else:
+                icon_lbl = tk.Label(row, text=key[0].upper(), fg="white", bg="black")
+                icon_lbl.pack(side=tk.LEFT)
+            value_lbl = tk.Label(row, text=str(self.stats.get(key, 0)), fg="white", bg="black")
+            value_lbl.pack(side=tk.LEFT, padx=(8, 0))
+            self.stat_labels[key] = value_lbl
 
         tk.Label(self.right_frame, text="", bg="black").pack()
 
@@ -460,14 +483,55 @@ class TextAdventureGame:
             w.destroy()
 
         self.master.configure(bg="black")
+        # Optional main menu background image (assets/mainmenu_bg.png|jpg)
+        bg_img = None
+        try:
+            base = os.path.dirname(__file__)
+            candidates = [os.path.join(base, 'assets', 'mainmenu_bg.png'),
+                          os.path.join(base, 'assets', 'mainmenu_bg.jpg'),
+                          os.path.join(base, 'images', 'mainmenu_bg.png'),
+                          os.path.join(base, 'images', 'mainmenu_bg.jpg')]
+            for p in candidates:
+                if os.path.exists(p):
+                    try:
+                        bg_img = tk.PhotoImage(file=p)
+                    except Exception:
+                        try:
+                            from PIL import Image, ImageTk
+                            img = Image.open(p)
+                            # scale to window size
+                            w, h = self.master.winfo_screenwidth(), self.master.winfo_screenheight()
+                            img = img.resize((w, h), Image.LANCZOS)
+                            bg_img = ImageTk.PhotoImage(img)
+                        except Exception:
+                            bg_img = None
+                    break
+        except Exception:
+            bg_img = None
+        if bg_img:
+            # keep a reference to avoid GC
+            self._mainmenu_bg_img = bg_img
+            bg_label = tk.Label(self.master, image=bg_img)
+            bg_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+            try:
+                # ensure background is behind other widgets
+                bg_label.lower()
+            except Exception:
+                pass
         title_font = tkfont.Font(family="Georgia", size=24, weight="bold")
-        title = tk.Label(self.master, text="Lost Skeleton", fg="white", bg="black", font=title_font)
-        title.pack(pady=20)
+        # Create a centered menu container for title/buttons (placed above background)
+        menu_container = tk.Frame(self.master, bg="", bd=0)
+        menu_container.place(relx=0.5, rely=0.12, anchor='n')
 
-        sub = tk.Label(self.master, text="A tale of small kindnesses and second chances.", fg="white", bg="black")
+        # (logo disabled) — title will be shown without a logo image
+
+        title = tk.Label(menu_container, text="Lost Skeleton", fg="white", bg="black", font=title_font)
+        title.pack(pady=8)
+
+        sub = tk.Label(menu_container, text="A tale of small kindnesses and second chances.", fg="white", bg="black")
         sub.pack(pady=6)
 
-        btn_frame = tk.Frame(self.master, bg="black")
+        btn_frame = tk.Frame(menu_container, bg="black")
         btn_frame.pack(pady=12)
 
         new_btn = tk.Button(btn_frame, text="New Game", width=20, command=self.start_new_game)
@@ -484,10 +548,22 @@ class TextAdventureGame:
 
         # Small hint about fullscreen
         hint = tk.Label(self.master, text="Press Escape to toggle fullscreen.", fg="gray", bg="black")
-        hint.pack(pady=6)
+        hint.place(relx=0.5, rely=0.95, anchor='s')
+
+        # Play main menu music if available and enabled (loop)
+        try:
+            if self.settings.get("enable_sound"):
+                self.start_music('mainmenu.mp3', loop=True)
+        except Exception:
+            pass
 
     def start_new_game(self):
         # reset tracking
+        # stop menu music if playing
+        try:
+            self.stop_music()
+        except Exception:
+            pass
         self.history = []
         self.stats = {"compassion": 0, "visibility": 0, "ambition": 0}
         # rebuild widgets and start at chapter 0
@@ -819,11 +895,60 @@ class TextAdventureGame:
         t = threading.Thread(target=_play, daemon=True)
         t.start()
 
+    def start_music(self, filename, loop=False):
+        """Start background music; if loop=True, repeatedly play until stopped."""
+        # Stop existing music
+        try:
+            self.stop_music()
+        except Exception:
+            pass
+        if not self.settings.get("enable_sound"):
+            return
+        if not playsound:
+            return
+        path = os.path.join(os.path.dirname(__file__), "soundtracks", filename)
+        if not os.path.exists(path):
+            return
+
+        stop_evt = threading.Event()
+        self._music_stop_event = stop_evt
+
+        def _loopplay():
+            try:
+                while not stop_evt.is_set():
+                    try:
+                        playsound(path)
+                    except Exception:
+                        # if playsound raises, break to avoid spam
+                        break
+                    if not loop:
+                        break
+            finally:
+                # clear references
+                self._music_stop_event = None
+                self._music_thread = None
+
+        t = threading.Thread(target=_loopplay, daemon=True)
+        self._music_thread = t
+        t.start()
+
+    def stop_music(self):
+        try:
+            if self._music_stop_event:
+                self._music_stop_event.set()
+            self._music_thread = None
+            self._music_stop_event = None
+        except Exception:
+            pass
+
     # --- HUD helpers ---
     def update_hud(self):
         # Update stat labels
         for k, lbl in self.stat_labels.items():
-            lbl.configure(text=f"{k.capitalize()}: {self.stats.get(k, 0)}")
+            try:
+                lbl.configure(text=str(self.stats.get(k, 0)))
+            except Exception:
+                pass
         # Update history listbox
         self.history_box.delete(0, tk.END)
         for i, h in enumerate(self.history, start=1):
@@ -855,6 +980,10 @@ class TextAdventureGame:
 
     def quit_game(self):
         messagebox.showinfo("Thanks for playing", "Goodbye.")
+        try:
+            self.stop_music()
+        except Exception:
+            pass
         self.master.destroy()
 
 
